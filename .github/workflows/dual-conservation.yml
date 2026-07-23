@@ -1,0 +1,22 @@
+name: Dual Conservation Lean CI
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["agent/dual-conservation"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: Research/DualConservation
+          build: true
+          test: false
+          lint: false
+          nanoda: true
+          nanoda-allow-sorry: false
