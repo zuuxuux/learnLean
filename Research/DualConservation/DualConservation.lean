@@ -16,7 +16,7 @@ assumption.
 
 namespace DualConservation
 
-open scoped BigOperators
+open scoped BigOperators ENNReal
 open MeasureTheory Set
 
 section FiniteCharging
