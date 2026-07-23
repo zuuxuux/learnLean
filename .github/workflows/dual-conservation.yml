@@ -13,15 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install pinned Lean toolchain
-        uses: leanprover/lean-action@v1
-        with:
-          lake-package-directory: Research/DualConservation
-          auto-config: false
-          build: false
-          test: false
-          lint: false
-          nanoda: false
+      - name: Install pinned Lean toolchain with elan
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain "$(cat Research/DualConservation/lean-toolchain)"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Build and capture diagnostics
         id: lean-build
@@ -30,6 +28,9 @@ jobs:
           set +e
           cd Research/DualConservation
           {
+            echo "== versions =="
+            lean --version
+            lake --version
             echo "== lake update =="
             lake update
             update_status=$?
