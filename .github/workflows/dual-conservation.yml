@@ -64,13 +64,57 @@ jobs:
         shell: bash
         run: test "$(cat Research/DualConservation/lean-build.exit)" = "0"
 
-      - name: Independent nanoda check
-        uses: leanprover/lean-action@v1
+      - name: Run independent nanoda and capture diagnostics
+        shell: bash
+        run: |
+          set +e
+          cd Research/DualConservation
+          (
+            set -euo pipefail
+            rm -rf _lean4export _nanoda_lib _nanoda_export.txt _nanoda_config.json
+
+            echo "== build lean4export =="
+            git clone --depth 1 https://github.com/leanprover/lean4export.git _lean4export
+            cp lean-toolchain _lean4export/
+            (cd _lean4export && lake build)
+
+            echo "== build nanoda =="
+            git clone --depth 1 --branch debug https://github.com/ammkrn/nanoda_lib.git _nanoda_lib
+            (cd _nanoda_lib && cargo build --release)
+
+            echo "== export project =="
+            lake env _lean4export/.lake/build/bin/lean4export DualConservation > _nanoda_export.txt
+            wc -c -l _nanoda_export.txt
+
+            cat > _nanoda_config.json <<'JSON'
+          {
+            "export_file_path": "_nanoda_export.txt",
+            "use_stdin": false,
+            "permitted_axioms": ["propext", "Classical.choice", "Quot.sound", "Lean.trustCompiler"],
+            "unpermitted_axiom_hard_error": false,
+            "nat_extension": true,
+            "string_extension": true,
+            "print_success_message": true
+          }
+          JSON
+
+            echo "== nanoda check =="
+            _nanoda_lib/target/release/nanoda_bin _nanoda_config.json
+          ) > nanoda.log 2>&1
+          nanoda_status=$?
+          printf '%s\n' "${nanoda_status}" > nanoda.exit
+          exit 0
+
+      - name: Upload independent-checker diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          lake-package-directory: Research/DualConservation
-          auto-config: false
-          build: false
-          test: false
-          lint: false
-          nanoda: true
-          nanoda-allow-sorry: false
+          name: dual-conservation-nanoda-log
+          path: |
+            Research/DualConservation/nanoda.log
+            Research/DualConservation/nanoda.exit
+          if-no-files-found: error
+
+      - name: Enforce successful independent check
+        shell: bash
+        run: test "$(cat Research/DualConservation/nanoda.exit)" = "0"
