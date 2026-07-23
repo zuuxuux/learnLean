@@ -1,52 +1,66 @@
-# Dual Conservation for Recursive Agents
+# Dual Conservation Lean Formalization
 
-This project formalizes a proposed systems law for agentic delegation:
+This project formalizes the accounting kernel of risk-budgeted recursive
+agent delegation. A root agent carries two affine capabilities:
 
-> A recursive agent must split both its deterministic authority and its
-> statistical confidence budget. Neither may be copied, and confidence used to
-> observe an outcome may not be refunded.
+- deterministic reserve; and
+- statistical miscoverage budget (`alpha`).
 
-The first capability is ordinary reserve: money, irreversible actions, API
-quota, write scope, or another material loss budget. The second is an `alpha`
-budget: the maximum acceptable probability that a locally certified action or
-an entire delegated run violates its stated bound.
+Both split rather than copy. Alpha uses four phases:
 
-## Checked results
+- `free`;
+- `pending` and provably unexposed;
+- `exposed` and burned; and
+- `observed` and burned.
 
-`DualConservation.lean` contains proofs of:
+The distinction between exposure and observation is deliberate. If an action
+creates the certified risk event and its result is then lost, the exposure still
+occurred. A correct runtime therefore burns alpha no later than the earliest
+risk-creating step and records outcome observation separately.
 
-- `adaptive_global_failure_bound`: arbitrarily dependent first-failure events
-  compose under additive alpha allocation. No independence assumption is used.
-- `dual_conservation_probability`: local reserve bounds plus local alpha bounds
-  imply a fleet-level bound on aggregate reserve exceedance.
-- `DelegationTree.recursive_dual_conservation`: local split constraints at every
-  fork imply global conservation over every terminal agent in an arbitrarily
-  deep binary delegation tree.
-- `fleet_confidence_no_cloning`: copying any positive confidence allowance to
-  two or more children exceeds the parent allowance.
-- `two_use_confidence_recycling_unsound`: even two independent reuses of a
-  positive allowance `p` produce failure probability `1 - (1-p)^2 > p`.
-- `AlphaReachable.burned_mono`: once alpha has funded an observed outcome, it
-  cannot return to the free pool under the trusted protocol.
+The main declarations are:
 
-There are no `sorry` declarations.
+- `dual_conservation_probability`: local reserve and alpha allocations imply a
+  fleet-level aggregate-loss bound without independence;
+- `DelegationTree.recursive_dual_conservation`: local split checks imply root
+  conservation over every finite binary delegation tree;
+- `fleet_confidence_no_cloning`: copying a positive allowance to two or more
+  children exceeds the parent allowance;
+- `two_attempt_refund_unsound`: success-based reuse breaks a nontrivial
+  end-to-end allowance after two independent attempts;
+- `AlphaReachable.burned_mono` and `exposure_irreversible`: exposure-burned
+  alpha cannot return to free or pending state; and
+- `AlphaReachable.observed_mono` and `observation_irreversible`: outcomes visible
+  to control logic cannot become unobserved.
 
-## Build
+## Run
 
-The project pins both Mathlib and its matching Lean release candidate.
-
-```sh
+```text
 lake update
 lake exe cache get
 lake build
+lake env leanchecker
 ```
 
-The included GitHub workflow also requests the independent `nanoda` checker and
-forbids `sorryAx`.
+Pinned environment:
 
-## Status of the research claim
+- Lean `v4.32.0-rc1`;
+- Mathlib `360da6fa66c1273b76b6b2d8c5666fd5ac2e3b56`.
 
-The Lean proofs establish the mathematical statements under the definitions in
-this repository. They do not by themselves establish literature priority. The
-associated research note separates the proved claims from the candidate-novel
-systems synthesis and documents the closest prior art.
+The exact source passed GitHub Actions run `30008862231`: a clean 8,581-job
+build and the bundled `leanchecker` environment check. It contains no `sorry`,
+`admit`, `unsafe` declaration, or user-declared axiom.
+
+An independently implemented `nanoda` check was attempted after a successful
+Lean environment export. It did not complete because its parser rejected the
+exported environment, so no independent-kernel claim is made.
+
+## Research status
+
+The Lean proofs establish the statements under the definitions in this
+repository. They do not establish literature priority. The associated research
+note treats the systems contribution as a falsifiable candidate synthesis:
+statistical miscoverage becomes recursively delegated affine execution state,
+bound before exposure, burned at exposure, separately marked at observation,
+and replaceable only through a proof that preserves a named global risk
+invariant.
