@@ -241,37 +241,60 @@ end RecursiveDelegation
 section BurnLaw
 
 /--
-`free` alpha may be bound to an unobserved action. Once the action is observed,
-its alpha moves to `burned`. Only pending, unobserved alpha may be cancelled.
+A statistical allocation has four phases:
+
+* `free`: not delegated;
+* `pending`: bound but provably unexposed;
+* `exposed`: the risk event can already have occurred, but the result has not
+  entered control logic; and
+* `observed`: the result can influence future choices.
+
+Both `exposed` and `observed` are burned. Only pending, unexposed alpha may be
+cancelled into the free pool.
 -/
 structure AlphaLedger where
   free : ℕ
   pending : ℕ
-  burned : ℕ
+  exposed : ℕ
+  observed : ℕ
   deriving DecidableEq, Repr
 
 namespace AlphaLedger
 
 /-- Total alpha mass represented by the ledger. -/
-def total (s : AlphaLedger) : ℕ := s.free + s.pending + s.burned
+def total (s : AlphaLedger) : ℕ :=
+  s.free + s.pending + s.exposed + s.observed
 
-/-- Bind alpha before observing an action outcome. -/
+/-- Alpha that has crossed the risk-exposure boundary. -/
+def burned (s : AlphaLedger) : ℕ := s.exposed + s.observed
+
+/-- Bind alpha before an action can create the certified risk event. -/
 def bind (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.free) : AlphaLedger :=
   { free := s.free - amount
     pending := s.pending + amount
-    burned := s.burned }
+    exposed := s.exposed
+    observed := s.observed }
 
-/-- Cancel an unobserved action and return its pending alpha. -/
+/-- Cancel a provably unexposed action and return its pending alpha. -/
 def cancel (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.pending) : AlphaLedger :=
   { free := s.free + amount
     pending := s.pending - amount
-    burned := s.burned }
+    exposed := s.exposed
+    observed := s.observed }
 
-/-- Observe an action outcome, irreversibly burning its bound alpha. -/
-def observe (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.pending) : AlphaLedger :=
+/-- Commit the risk exposure, irreversibly burning bound alpha. -/
+def expose (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.pending) : AlphaLedger :=
   { free := s.free
     pending := s.pending - amount
-    burned := s.burned + amount }
+    exposed := s.exposed + amount
+    observed := s.observed }
+
+/-- Reveal an already-exposed outcome to control logic. -/
+def observe (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.exposed) : AlphaLedger :=
+  { free := s.free
+    pending := s.pending
+    exposed := s.exposed - amount
+    observed := s.observed + amount }
 
 @[simp] theorem total_bind (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.free) :
     (s.bind amount h).total = s.total := by
@@ -283,20 +306,45 @@ def observe (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.pending) : Alpha
   simp [cancel, total]
   omega
 
-@[simp] theorem total_observe (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) :
+@[simp] theorem total_expose (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) :
+    (s.expose amount h).total = s.total := by
+  simp [expose, total]
+  omega
+
+@[simp] theorem total_observe (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.exposed) :
     (s.observe amount h).total = s.total := by
   simp [observe, total]
   omega
 
+@[simp] theorem burned_bind (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.free) :
+    (s.bind amount h).burned = s.burned := by
+  simp [bind, burned]
+
+@[simp] theorem burned_cancel (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) :
+    (s.cancel amount h).burned = s.burned := by
+  simp [cancel, burned]
+
+@[simp] theorem burned_expose (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) :
+    (s.expose amount h).burned = s.burned + amount := by
+  simp [expose, burned]
+  omega
+
+@[simp] theorem burned_observe (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.exposed) :
+    (s.observe amount h).burned = s.burned := by
+  simp [observe, burned]
+  omega
+
 end AlphaLedger
 
-/-- Trusted transitions. There is intentionally no transition from burned to free. -/
+/-- Trusted transitions. There is intentionally no burned-to-free transition. -/
 inductive AlphaStep : AlphaLedger → AlphaLedger → Prop
   | bind (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.free) :
       AlphaStep s (s.bind amount h)
   | cancel (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) :
       AlphaStep s (s.cancel amount h)
-  | observe (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) :
+  | expose (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) :
+      AlphaStep s (s.expose amount h)
+  | observe (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.exposed) :
       AlphaStep s (s.observe amount h)
 
 namespace AlphaStep
@@ -306,11 +354,23 @@ theorem total_eq {s t : AlphaLedger} (h : AlphaStep s t) : t.total = s.total := 
   cases h with
   | bind amount h => exact AlphaLedger.total_bind _ amount h
   | cancel amount h => exact AlphaLedger.total_cancel _ amount h
+  | expose amount h => exact AlphaLedger.total_expose _ amount h
   | observe amount h => exact AlphaLedger.total_observe _ amount h
 
 /-- Burned confidence is monotone under every trusted transition. -/
-theorem burned_mono {s t : AlphaLedger} (h : AlphaStep s t) : s.burned ≤ t.burned := by
-  cases h <;> simp [AlphaLedger.bind, AlphaLedger.cancel, AlphaLedger.observe]
+theorem burned_mono {s t : AlphaLedger} (h : AlphaStep s t) :
+    s.burned ≤ t.burned := by
+  cases h with
+  | bind amount h => simp
+  | cancel amount h => simp
+  | expose amount h => simp
+  | observe amount h => simp
+
+/-- The amount already observed by control logic is monotone. -/
+theorem observed_mono {s t : AlphaLedger} (h : AlphaStep s t) :
+    s.observed ≤ t.observed := by
+  cases h <;> simp [AlphaLedger.bind, AlphaLedger.cancel,
+    AlphaLedger.expose, AlphaLedger.observe]
 
 end AlphaStep
 
@@ -323,14 +383,15 @@ inductive AlphaReachable : AlphaLedger → AlphaLedger → Prop
 namespace AlphaReachable
 
 /-- Total alpha mass is invariant along every valid execution. -/
-theorem total_eq {s t : AlphaLedger} (h : AlphaReachable s t) : t.total = s.total := by
+theorem total_eq {s t : AlphaLedger} (h : AlphaReachable s t) :
+    t.total = s.total := by
   induction h with
   | refl => rfl
   | tail hReach hStep ih => exact hStep.total_eq.trans ih
 
 /--
-Confidence burn law: once alpha is burned, no valid future execution can make
-it unburned. Successful observation is not a refund operation.
+Exposure burn law: once alpha has crossed the risk-exposure boundary, no valid
+future execution can return it to free or pending authority.
 -/
 theorem burned_mono {s t : AlphaLedger} (h : AlphaReachable s t) :
     s.burned ≤ t.burned := by
@@ -338,14 +399,30 @@ theorem burned_mono {s t : AlphaLedger} (h : AlphaReachable s t) :
   | refl => exact le_rfl
   | tail hReach hStep ih => exact ih.trans hStep.burned_mono
 
-/-- Alpha burned by one observation remains burned in every reachable state. -/
-theorem observed_irreversible
+/-- Outcomes already visible to control logic cannot become unobserved. -/
+theorem observed_mono {s t : AlphaLedger} (h : AlphaReachable s t) :
+    s.observed ≤ t.observed := by
+  induction h with
+  | refl => exact le_rfl
+  | tail hReach hStep ih => exact ih.trans hStep.observed_mono
+
+/-- Alpha burned by one exposure remains burned in every reachable state. -/
+theorem exposure_irreversible
     (s u : AlphaLedger)
     (amount : ℕ)
     (hPending : amount ≤ s.pending)
-    (hReach : AlphaReachable (s.observe amount hPending) u) :
+    (hReach : AlphaReachable (s.expose amount hPending) u) :
     s.burned + amount ≤ u.burned := by
-  simpa [AlphaLedger.observe] using hReach.burned_mono
+  simpa using hReach.burned_mono
+
+/-- Alpha made visible by one observation remains observed in every future state. -/
+theorem observation_irreversible
+    (s u : AlphaLedger)
+    (amount : ℕ)
+    (hExposed : amount ≤ s.exposed)
+    (hReach : AlphaReachable (s.observe amount hExposed) u) :
+    s.observed + amount ≤ u.observed := by
+  simpa [AlphaLedger.observe] using hReach.observed_mono
 
 end AlphaReachable
 
