@@ -25,9 +25,9 @@ variable {ι Ω : Type*} [Fintype ι]
 
 /-- Summing locally charged failure mass preserves a root alpha budget. -/
 theorem finite_alpha_charging
-    (charged allocated : ι → ℝ≥0∞) (rootAlpha : ℝ≥0∞)
-    (hLocal : ∀ i, charged i ≤ allocated i)
-    (hBudget : (∑ i, allocated i) ≤ rootAlpha) :
+    (charged allocation : ι → ℝ≥0∞) (rootAlpha : ℝ≥0∞)
+    (hLocal : ∀ i, charged i ≤ allocation i)
+    (hBudget : (∑ i, allocation i) ≤ rootAlpha) :
     (∑ i, charged i) ≤ rootAlpha := by
   exact (Finset.sum_le_sum fun i _ => hLocal i).trans hBudget
 
@@ -36,19 +36,19 @@ Arbitrarily dependent first-failure events compose under an additive alpha
 budget. `firstFailure i` should denote the event that commit `i` is the first
 certificate failure on its execution history.
 -/
-theorem adaptive_global_failure_bound
+theorem first_failure_union_bound
     [MeasurableSpace Ω]
     (μ : Measure Ω)
     (firstFailure : ι → Set Ω)
-    (allocatedAlpha : ι → ℝ≥0∞)
+    (alphaAllocation : ι → ℝ≥0∞)
     (rootAlpha : ℝ≥0∞)
-    (hLocal : ∀ i, μ (firstFailure i) ≤ allocatedAlpha i)
-    (hBudget : (∑ i, allocatedAlpha i) ≤ rootAlpha) :
+    (hLocal : ∀ i, μ (firstFailure i) ≤ alphaAllocation i)
+    (hBudget : (∑ i, alphaAllocation i) ≤ rootAlpha) :
     μ (⋃ i, firstFailure i) ≤ rootAlpha := by
   calc
     μ (⋃ i, firstFailure i) ≤ ∑ i, μ (firstFailure i) :=
       measure_iUnion_fintype_le μ firstFailure
-    _ ≤ ∑ i, allocatedAlpha i := Finset.sum_le_sum fun i _ => hLocal i
+    _ ≤ ∑ i, alphaAllocation i := Finset.sum_le_sum fun i _ => hLocal i
     _ ≤ rootAlpha := hBudget
 
 /--
@@ -83,12 +83,12 @@ theorem dual_conservation_probability
     (μ : Measure Ω)
     (loss : ι → Ω → ℕ)
     (reserve : ι → ℕ)
-    (allocatedAlpha : ι → ℝ≥0∞)
+    (alphaAllocation : ι → ℝ≥0∞)
     (rootReserve : ℕ)
     (rootAlpha : ℝ≥0∞)
     (hReserve : (∑ i, reserve i) ≤ rootReserve)
-    (hLocal : ∀ i, μ {ω | reserve i < loss i ω} ≤ allocatedAlpha i)
-    (hAlpha : (∑ i, allocatedAlpha i) ≤ rootAlpha) :
+    (hLocal : ∀ i, μ {ω | reserve i < loss i ω} ≤ alphaAllocation i)
+    (hAlpha : (∑ i, alphaAllocation i) ≤ rootAlpha) :
     μ {ω | rootReserve < ∑ i, loss i ω} ≤ rootAlpha := by
   calc
     μ {ω | rootReserve < ∑ i, loss i ω} ≤
@@ -96,7 +96,7 @@ theorem dual_conservation_probability
       measure_mono (aggregate_exceedance_subset_local_failure loss reserve rootReserve hReserve)
     _ ≤ ∑ i, μ {ω | reserve i < loss i ω} :=
       measure_iUnion_fintype_le μ fun i => {ω | reserve i < loss i ω}
-    _ ≤ ∑ i, allocatedAlpha i := Finset.sum_le_sum fun i _ => hLocal i
+    _ ≤ ∑ i, alphaAllocation i := Finset.sum_le_sum fun i _ => hLocal i
     _ ≤ rootAlpha := hAlpha
 
 end FiniteCharging
@@ -107,19 +107,39 @@ variable {ι : Type*} [Fintype ι]
 
 /-- Deterministic and statistical capabilities are conserved componentwise. -/
 theorem dual_accounting
-    (usedReserve allocatedReserve : ι → ℕ)
-    (chargedAlpha allocatedAlpha : ι → ℝ≥0∞)
+    (usedReserve reserveAllocation : ι → ℕ)
+    (chargedAlpha alphaAllocation : ι → ℝ≥0∞)
     (rootReserve : ℕ)
     (rootAlpha : ℝ≥0∞)
-    (hReserveLocal : ∀ i, usedReserve i ≤ allocatedReserve i)
-    (hAlphaLocal : ∀ i, chargedAlpha i ≤ allocatedAlpha i)
-    (hReserveBudget : (∑ i, allocatedReserve i) ≤ rootReserve)
-    (hAlphaBudget : (∑ i, allocatedAlpha i) ≤ rootAlpha) :
+    (hReserveLocal : ∀ i, usedReserve i ≤ reserveAllocation i)
+    (hAlphaLocal : ∀ i, chargedAlpha i ≤ alphaAllocation i)
+    (hReserveBudget : (∑ i, reserveAllocation i) ≤ rootReserve)
+    (hAlphaBudget : (∑ i, alphaAllocation i) ≤ rootAlpha) :
     (∑ i, usedReserve i) ≤ rootReserve ∧
       (∑ i, chargedAlpha i) ≤ rootAlpha := by
   constructor
   · exact (Finset.sum_le_sum fun i _ => hReserveLocal i).trans hReserveBudget
   · exact (Finset.sum_le_sum fun i _ => hAlphaLocal i).trans hAlphaBudget
+
+/--
+The excess failure probability created by refunding a one-shot allowance after
+one observed success is exactly `p * (1 - p)`.
+-/
+theorem two_attempt_refund_inflation_identity (p : ℝ) :
+    (1 - (1 - p)^2) - p = p * (1 - p) := by
+  ring
+
+/--
+Confidence burn law for two independent attempts: for any nontrivial per-attempt
+failure probability, treating a successful first attempt as a refund makes the
+two-attempt failure probability strictly larger than the original allowance.
+-/
+theorem two_attempt_refund_unsound
+    (p : ℝ) (hp0 : 0 < p) (hp1 : p < 1) :
+    p < 1 - (1 - p)^2 := by
+  rw [← sub_pos]
+  rw [two_attempt_refund_inflation_identity p]
+  exact mul_pos hp0 (sub_pos.mpr hp1)
 
 /-- A positive confidence budget cannot be copied even to two children. -/
 theorem binary_confidence_no_cloning (alpha : ℕ) (hAlpha : 0 < alpha) :
@@ -190,11 +210,11 @@ theorem recursive_dual_conservation (tree : DelegationTree)
       tree.leafAlpha ≤ tree.root.alpha := by
   induction tree with
   | leaf budget =>
-      simp [WellFormed, leafReserve, leafAlpha, root]
+      simp [leafReserve, leafAlpha, root]
   | fork budget left right ihLeft ihRight =>
       rcases h with ⟨hReserve, hAlpha, hLeft, hRight⟩
-      have leftBound := ihLeft hLeft
-      have rightBound := ihRight hRight
+      rcases ihLeft hLeft with ⟨hLeftReserve, hLeftAlpha⟩
+      rcases ihRight hRight with ⟨hRightReserve, hRightAlpha⟩
       simp only [leafReserve, leafAlpha, root]
       constructor <;> omega
 
@@ -216,6 +236,8 @@ theorem two_use_confidence_recycling_unsound
 example : (5 : ℚ) / 100 < 1 - (1 - (5 : ℚ) / 100) ^ 2 := by
   norm_num
 
+end RecursiveDelegation
+
 section BurnLaw
 
 /--
@@ -234,19 +256,19 @@ namespace AlphaLedger
 def total (s : AlphaLedger) : ℕ := s.free + s.pending + s.burned
 
 /-- Bind alpha before observing an action outcome. -/
-def bind (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.free) : AlphaLedger :=
+def bind (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.free) : AlphaLedger :=
   { free := s.free - amount
     pending := s.pending + amount
     burned := s.burned }
 
 /-- Cancel an unobserved action and return its pending alpha. -/
-def cancel (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) : AlphaLedger :=
+def cancel (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.pending) : AlphaLedger :=
   { free := s.free + amount
     pending := s.pending - amount
     burned := s.burned }
 
 /-- Observe an action outcome, irreversibly burning its bound alpha. -/
-def observe (s : AlphaLedger) (amount : ℕ) (h : amount ≤ s.pending) : AlphaLedger :=
+def observe (s : AlphaLedger) (amount : ℕ) (_h : amount ≤ s.pending) : AlphaLedger :=
   { free := s.free
     pending := s.pending - amount
     burned := s.burned + amount }
@@ -282,9 +304,9 @@ namespace AlphaStep
 /-- Every trusted transition conserves total alpha mass. -/
 theorem total_eq {s t : AlphaLedger} (h : AlphaStep s t) : t.total = s.total := by
   cases h with
-  | bind s amount h => exact AlphaLedger.total_bind s amount h
-  | cancel s amount h => exact AlphaLedger.total_cancel s amount h
-  | observe s amount h => exact AlphaLedger.total_observe s amount h
+  | bind amount h => exact AlphaLedger.total_bind _ amount h
+  | cancel amount h => exact AlphaLedger.total_cancel _ amount h
+  | observe amount h => exact AlphaLedger.total_observe _ amount h
 
 /-- Burned confidence is monotone under every trusted transition. -/
 theorem burned_mono {s t : AlphaLedger} (h : AlphaStep s t) : s.burned ≤ t.burned := by
@@ -303,7 +325,7 @@ namespace AlphaReachable
 /-- Total alpha mass is invariant along every valid execution. -/
 theorem total_eq {s t : AlphaLedger} (h : AlphaReachable s t) : t.total = s.total := by
   induction h with
-  | refl s => rfl
+  | refl => rfl
   | tail hReach hStep ih => exact hStep.total_eq.trans ih
 
 /--
@@ -313,7 +335,7 @@ it unburned. Successful observation is not a refund operation.
 theorem burned_mono {s t : AlphaLedger} (h : AlphaReachable s t) :
     s.burned ≤ t.burned := by
   induction h with
-  | refl s => exact le_rfl
+  | refl => exact le_rfl
   | tail hReach hStep ih => exact ih.trans hStep.burned_mono
 
 /-- Alpha burned by one observation remains burned in every reachable state. -/
