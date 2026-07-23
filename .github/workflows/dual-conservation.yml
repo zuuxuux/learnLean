@@ -12,10 +12,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: leanprover/lean-action@v1
+
+      - name: Install pinned Lean toolchain
+        uses: leanprover/lean-action@v1
         with:
           lake-package-directory: Research/DualConservation
-          build: true
+          auto-config: false
+          build: false
+          test: false
+          lint: false
+          nanoda: false
+
+      - name: Build and capture diagnostics
+        id: lean-build
+        shell: bash
+        run: |
+          set +e
+          cd Research/DualConservation
+          {
+            echo "== lake update =="
+            lake update
+            update_status=$?
+            echo "lake_update_status=${update_status}"
+            if [ "${update_status}" -eq 0 ]; then
+              echo "== mathlib cache =="
+              lake exe cache get
+              echo "cache_status=$?"
+              echo "== lake build =="
+              lake build
+              build_status=$?
+            else
+              build_status=${update_status}
+            fi
+            echo "lean_build_status=${build_status}"
+          } > lean-build.log 2>&1
+          printf '%s\n' "${build_status}" > lean-build.exit
+          exit 0
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dual-conservation-build-log
+          path: |
+            Research/DualConservation/lean-build.log
+            Research/DualConservation/lean-build.exit
+          if-no-files-found: error
+
+      - name: Enforce successful Lean build
+        shell: bash
+        run: test "$(cat Research/DualConservation/lean-build.exit)" = "0"
+
+      - name: Independent nanoda check
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: Research/DualConservation
+          auto-config: false
+          build: false
           test: false
           lint: false
           nanoda: true
